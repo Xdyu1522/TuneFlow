@@ -8,3 +8,4 @@ riderModule.iml
 TestResults/
 *.trx
 .dotnet/
+.git_allowed_signers
