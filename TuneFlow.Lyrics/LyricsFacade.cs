@@ -22,7 +22,7 @@ public static class LyricsFacade
     {
         var mergeLines = mergeLyric.Lines.OrderBy(l => l.StartTime).ToImmutableArray();
         var mergeTimes = mergeLines.Select(l => l.StartTime).ToArray();
-        var mergedLines = new List<LyricLine>(originLyric.Lines.Length);
+        var mergedLines = new List<ILyricLine>(originLyric.Lines.Length);
 
         foreach (var line in originLyric.Lines)
         {
@@ -69,9 +69,9 @@ public static class LyricsFacade
         return mergedLyric;
     }
 
-    private static LyricLine? TryFindBestMatchByTime(
+    private static ILyricLine? TryFindBestMatchByTime(
         TimeSpan target,
-        ImmutableArray<LyricLine> orderedLines,
+        ImmutableArray<ILyricLine> orderedLines,
         TimeSpan[] orderedTimes,
         int maxTimeDeltaMs)
     {
@@ -87,7 +87,7 @@ public static class LyricsFacade
             index = ~index;
         }
 
-        LyricLine? best = null;
+        ILyricLine? best = null;
         long bestDelta = long.MaxValue;
 
         for (var left = index - 1; left >= 0; left--)
@@ -123,18 +123,9 @@ public static class LyricsFacade
         return best;
     }
 
-    private static LyricLine DetachTrackReferences(LyricLine source)
+    private static ILyricLine DetachTrackReferences(ILyricLine source)
     {
-        var words = source.Words?
-            .Select(word => word with { })
-            .ToImmutableList();
-
-        return source with
-        {
-            Words = words,
-            Translation = null,
-            Romanization = null
-        };
+        return source.DetachTrackReferences();
     }
 
     // 格式转换

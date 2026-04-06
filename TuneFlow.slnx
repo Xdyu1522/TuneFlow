@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="TuneFlow.Lyrics.Tests/TuneFlow.Lyrics.Tests.csproj" />
   <Project Path="TuneFlow.Lyrics/TuneFlow.Lyrics.csproj" />
+  <Project Path="TuneFlow.Workflow/TuneFlow.Workflow.csproj" />
 </Solution>

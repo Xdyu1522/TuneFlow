@@ -13,7 +13,8 @@ public class LyricLineParseTests
 
         var result = LyricsFacade.Parse(content);
 
-        result.Lines.Should().BeOfType<ImmutableArray<LyricLine>>();
+        result.Lines.Should().BeOfType<ImmutableArray<ILyricLine>>();
+        result.Lines.Should().OnlyContain(line => line is LyricLine);
         result.Lines.Length.Should().BeGreaterThan(70);
         result.Lines.Should().BeInAscendingOrder(line => line.StartTime);
         result.Lines[0].Text.Should().Be("作词 : ピノキオピー");

@@ -1,3 +1,6 @@
+using System.Text;
+using TuneFlow.Lyrics.Exporting;
+
 namespace TuneFlow.Lyrics.Models;
 
 /// <summary>
@@ -74,6 +77,29 @@ public sealed class LyricMeta
                 _customTags.Add(key, value);
                 break;
         }
+    }
+    
+    public string Export(string lineBreak)
+    {
+        var lines = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(Title)) lines.Add($"[ti:{Title}]");
+        if (!string.IsNullOrWhiteSpace(Artist)) lines.Add($"[ar:{Artist}]");
+        if (!string.IsNullOrWhiteSpace(Album)) lines.Add($"[al:{Album}]");
+        if (!string.IsNullOrWhiteSpace(Author)) lines.Add($"[au:{Author}]");
+        if (!string.IsNullOrWhiteSpace(Creator)) lines.Add($"[by:{Creator}]");
+        if (EmbeddedOffsetMs.HasValue) lines.Add($"[offset:{EmbeddedOffsetMs.Value}]");
+        if (!string.IsNullOrWhiteSpace(Version)) lines.Add($"[ve:{Version}]");
+
+        foreach (var (key, value) in _customTags)
+        {
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+            {
+                lines.Add($"[{key}:{value}]");
+            }
+        }
+
+        return string.Join(lineBreak, lines);
     }
 
     private void AddToCustom(string key, string value)

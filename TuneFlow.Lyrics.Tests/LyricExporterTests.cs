@@ -6,16 +6,17 @@ using TuneFlow.Lyrics.Models;
 
 namespace TuneFlow.Lyrics.Tests;
 
-public class LyricTextExporterTests
+public class LyricExporterTests
 {
     [Fact]
     public void Export_Interleaved_ShouldOutputOriginalThenTranslationThenRomanizationPerLine()
     {
         var document = CreateSampleDocument();
 
-        var result = LyricTextExporter.Export(document, new LyricTextExportOptions
+        var result = LyricExporter.Export(document, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Interleaved,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Interleaved,
             LineBreak = "\n"
         });
 
@@ -33,9 +34,10 @@ public class LyricTextExporterTests
     {
         var document = CreateSampleDocument();
 
-        var result = LyricTextExporter.Export(document, new LyricTextExportOptions
+        var result = LyricExporter.Export(document, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Interleaved,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Interleaved,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet.Create(LyricTrackKind.Translation)
         });
@@ -50,13 +52,13 @@ public class LyricTextExporterTests
     [Fact]
     public void Export_Interleaved_ShouldSkipMissingTrackLines()
     {
-        var line1 = new LyricLine
+        ILyricLine line1 = new LyricLine
         {
             StartTime = TimeSpan.FromSeconds(1),
             Text = "orig-1",
             Translation = new LyricLine { StartTime = TimeSpan.FromMilliseconds(1050), Text = "trans-1" }
         };
-        var line2 = new LyricLine
+        ILyricLine line2 = new LyricLine
         {
             StartTime = TimeSpan.FromSeconds(2),
             Text = "orig-2"
@@ -67,9 +69,10 @@ public class LyricTextExporterTests
             TrackKind = LyricTrackKind.Original
         };
 
-        var result = LyricTextExporter.Export(document, new LyricTextExportOptions
+        var result = LyricExporter.Export(document, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Interleaved,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Interleaved,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet.Create(LyricTrackKind.Translation)
         });
@@ -85,9 +88,10 @@ public class LyricTextExporterTests
     {
         var document = CreateSampleDocument();
 
-        var result = LyricTextExporter.Export(document, new LyricTextExportOptions
+        var result = LyricExporter.Export(document, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Separated,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Separated,
             LineBreak = "\n"
         });
 
@@ -105,9 +109,10 @@ public class LyricTextExporterTests
     {
         var document = CreateSampleDocument();
 
-        var result = LyricTextExporter.Export(document, new LyricTextExportOptions
+        var result = LyricExporter.Export(document, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Separated,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Separated,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet<LyricTrackKind>.Empty
         });
@@ -122,9 +127,10 @@ public class LyricTextExporterTests
     {
         var document = CreateSampleDocument();
 
-        var result = LyricTextExporter.Export(document, new LyricTextExportOptions
+        var result = LyricExporter.Export(document, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Interleaved,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Interleaved,
             LineBreak = "\n"
         });
 
@@ -134,7 +140,7 @@ public class LyricTextExporterTests
     [Fact]
     public void Export_ShouldFormatHourAndEndTimestamp()
     {
-        var line = new LyricLine
+        ILyricLine line = new LyricLine
         {
             StartTime = new TimeSpan(1, 2, 3),
             EndTime = new TimeSpan(1, 2, 4),
@@ -146,9 +152,10 @@ public class LyricTextExporterTests
             TrackKind = LyricTrackKind.Original
         };
 
-        var result = LyricTextExporter.Export(document, new LyricTextExportOptions
+        var result = LyricExporter.Export(document, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Separated,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Separated,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet<LyricTrackKind>.Empty
         });
@@ -176,29 +183,54 @@ public class LyricTextExporterTests
             AllowUnmatched = true
         });
 
-        var exported = LyricTextExporter.Export(merged, new LyricTextExportOptions
+        var exported = LyricExporter.Export(merged, new LyricExportOptions
         {
-            ExportMode = LyricTextExportMode.Interleaved,
+            ExportFormat = ExportFormat.Lrc,
+            ExportMode = LyricExportMode.Interleaved,
             LineBreak = "\r\n",
             IncludeKinds = ImmutableHashSet.Create(LyricTrackKind.Translation, LyricTrackKind.Romanization)
         });
         var expected = TestResourceLocator.ReadAllText("song-3-combined.lrc");
 
-        NormalizeLineEndings(exported).Should().Be(NormalizeLineEndings(expected));
+        var exportedWithoutMeta = StripHeaderIfPresent(exported, "\r\n");
+        NormalizeLineEndings(exportedWithoutMeta).Should().Be(NormalizeLineEndings(expected));
     }
 
     private static string NormalizeLineEndings(string text) => text.Replace("\r\n", "\n");
 
+    private static string StripHeaderIfPresent(string text, string lineBreak)
+    {
+        var normalized = NormalizeLineEndings(text);
+        var normalizedBreak = NormalizeLineEndings(lineBreak);
+
+        if (!normalized.StartsWith("[ti:")) return text;
+
+        var lines = normalized.Split('\n').ToList();
+        var headerKeys = new HashSet<string> { "ti", "ar", "al", "au", "by", "offset", "ve" };
+        var index = 0;
+        while (index < lines.Count)
+        {
+            var line = lines[index];
+            if (!line.StartsWith("[") || !line.Contains(':') || !line.EndsWith("]")) break;
+            var key = line[1..line.IndexOf(':')];
+            if (!headerKeys.Contains(key)) break;
+            index++;
+        }
+
+        var stripped = string.Join("\n", lines.Skip(index));
+        return normalizedBreak == "\n" ? stripped : stripped.Replace("\n", normalizedBreak);
+    }
+
     private static LyricDocument CreateSampleDocument()
     {
-        var line1 = new LyricLine
+        ILyricLine line1 = new LyricLine
         {
             StartTime = TimeSpan.FromSeconds(1),
             Text = "orig-1",
             Translation = new LyricLine { StartTime = TimeSpan.FromMilliseconds(1050), Text = "trans-1" },
             Romanization = new LyricLine { StartTime = TimeSpan.FromMilliseconds(1080), Text = "roma-1" }
         };
-        var line2 = new LyricLine
+        ILyricLine line2 = new LyricLine
         {
             StartTime = TimeSpan.FromSeconds(2),
             Text = "orig-2",
