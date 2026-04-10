@@ -16,7 +16,7 @@ public class LyricExporterTests
         var result = LyricExporter.Export(document, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Interleaved,
+            ExportMode = ExportMode.Interleaved,
             LineBreak = "\n"
         });
 
@@ -37,7 +37,7 @@ public class LyricExporterTests
         var result = LyricExporter.Export(document, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Interleaved,
+            ExportMode = ExportMode.Interleaved,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet.Create(LyricTrackKind.Translation)
         });
@@ -72,7 +72,7 @@ public class LyricExporterTests
         var result = LyricExporter.Export(document, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Interleaved,
+            ExportMode = ExportMode.Interleaved,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet.Create(LyricTrackKind.Translation)
         });
@@ -91,7 +91,7 @@ public class LyricExporterTests
         var result = LyricExporter.Export(document, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Separated,
+            ExportMode = ExportMode.Separated,
             LineBreak = "\n"
         });
 
@@ -112,7 +112,7 @@ public class LyricExporterTests
         var result = LyricExporter.Export(document, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Separated,
+            ExportMode = ExportMode.Separated,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet<LyricTrackKind>.Empty
         });
@@ -130,7 +130,7 @@ public class LyricExporterTests
         var result = LyricExporter.Export(document, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Interleaved,
+            ExportMode = ExportMode.Interleaved,
             LineBreak = "\n"
         });
 
@@ -155,7 +155,7 @@ public class LyricExporterTests
         var result = LyricExporter.Export(document, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Separated,
+            ExportMode = ExportMode.Separated,
             LineBreak = "\n",
             IncludeKinds = ImmutableHashSet<LyricTrackKind>.Empty
         });
@@ -186,7 +186,7 @@ public class LyricExporterTests
         var exported = LyricExporter.Export(merged, new LyricExportOptions
         {
             ExportFormat = ExportFormat.Lrc,
-            ExportMode = LyricExportMode.Interleaved,
+            ExportMode = ExportMode.Interleaved,
             LineBreak = "\r\n",
             IncludeKinds = ImmutableHashSet.Create(LyricTrackKind.Translation, LyricTrackKind.Romanization)
         });

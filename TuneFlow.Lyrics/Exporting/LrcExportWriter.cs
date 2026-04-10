@@ -18,10 +18,10 @@ public sealed class LrcExportWriter : IExportWriter
 
         switch (options.ExportMode)
         {
-            case LyricExportMode.Interleaved:
+            case ExportMode.Interleaved:
                 results.AddRange(document.Lines.Select(line => WriteInterleaved(line, options)));
                 break;
-            case LyricExportMode.Separated:
+            case ExportMode.Separated:
                 results.Add(WriteBlock(document.Lines, options.LineBreak));
                 if (options.IncludeKinds.Contains(LyricTrackKind.Translation))
                 {
@@ -44,12 +44,12 @@ public sealed class LrcExportWriter : IExportWriter
     {
         var lines = new List<string> { WriteLine(line) };
 
-        if (options.IncludeKinds.Contains(LyricTrackKind.Translation) && line.Translation is not null)
+        if (options.IncludeKinds.Contains(LyricTrackKind.Translation) && line.Translation is not null && !string.IsNullOrWhiteSpace(line.Translation.Text))
         {
             lines.Add(WriteLine(line.Translation));
         }
 
-        if (options.IncludeKinds.Contains(LyricTrackKind.Romanization) && line.Romanization is not null)
+        if (options.IncludeKinds.Contains(LyricTrackKind.Romanization) && line.Romanization is not null && !string.IsNullOrWhiteSpace(line.Romanization.Text))
         {
             lines.Add(WriteLine(line.Romanization));
         }

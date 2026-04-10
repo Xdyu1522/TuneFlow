@@ -1,6 +1,6 @@
 namespace TuneFlow.Lyrics.Exporting;
 
-public enum LyricExportMode
+public enum ExportMode
 {
     Interleaved,
     Separated
