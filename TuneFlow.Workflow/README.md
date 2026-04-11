@@ -1,188 +1,199 @@
 # TuneFlow.Workflow
 
-`TuneFlow.Workflow` 提供 NCM 处理流水线，负责：
+`TuneFlow.Workflow` 提供 NCM 文件处理流水线，负责：
 
-- 读取与校验输入文件
-- 解密音频
+- 解密音频文件
 - 拉取并处理歌词
-- 拉取封面
+- 拉取封面图片
 - 嵌入元信息（歌词/封面）
-- 按配置保存附加资源文件
+- 保存附加资源文件
 
-当前实现基于 `TPL Dataflow`，并通过 `WorkflowFactory` 按上下文配置动态连接 Block。
+基于 `Channel` + `Parallel.ForEachAsync` 实现高效的文件级并行处理与背压控制。
 
 ## 核心结构
 
-### 1) 上下文与请求模型
+### 1) 请求与结果模型
 
-- `WorkflowRequest`
-  - 面向“外部调用输入”
-  - 支持两种输出定位方式：
-    - `OutputPath`（完整路径）
-    - `OutputDirectory + OutputFileName`（扩展名由 `NcmFile.SaveFormat` 自动推断）
-- `WorkflowContext`
-  - 面向“内部流水线状态”
-  - 包含：
-    - 输入文件与 `NcmFile`
-    - 输出路径
-    - `LyricsOptions` / `CoverOptions`
-    - `WorkflowExecutionOptions`（Dataflow 执行参数）
-    - 运行时数据：`CoverData`、`LyricsDocument`、`ExportedLyric`
-    - `IProgress<WorkflowProgress>`
-- `WorkflowContextBuilder`
-  - Fluent 构建器
-  - 用于显式构造 `WorkflowContext`
+- `WorkflowRequest` - 输入请求
+  - `SourceFilePath`：源文件路径（必需）
+  - `OutputDirectory`：输出目录（必需，文件名自动从 NCM 元数据获取）
+  - `LyricsOptions`：歌词处理配置
+  - `CoverOptions`：封面处理配置
+  - `Progress`：进度回调
+
+- `WorkflowResult` - 处理结果
+  - `SourceFilePath`：源文件路径
+  - `OutputFilePath`：输出音频文件路径
+  - `LyricsFilePath`：歌词文件路径（如保存）
+  - `CoverFilePath`：封面文件路径（如保存）
+  - `Error`：错误信息（失败时）
+  - `IsSuccess`：是否成功
+
+- `WorkflowContext` - 内部流水线状态
+  - 包含运行时数据：`CoverData`、`LyricsDocument`、`ExportedLyric`
 
 ### 2) Block 列表
 
-- `PrepareContextBlock`（请求入口专用）
-  - `WorkflowRequest -> WorkflowContext`
-  - 内部调用 `NcmDecoder.Open(...)`
-- `StartBlock`
-  - 输入合法性校验与目录准备
-- `DecryptBlock`
-  - 解密输出音频
-- `GetLyricsBlock`
-  - 按 `LyricsOptions.Strategy` 选择 provider 拉取并导出歌词字符串
-- `GetCoverBlock`
-  - 按 `CoverOptions.Strategy` 选择 provider 拉取封面，支持 `NetWorkFirst`/`InFileFirst` fallback
-- `EmbedBlock`
-  - 写入标题、艺人、专辑、歌词、封面
-- `SaveToFileBlock`
-  - 保存歌词/封面到文件
+- `GetLyricsBlock` - 按 `LyricsOptions.Strategy` 选择 provider 拉取并导出歌词
+- `GetCoverBlock` - 按 `CoverOptions.Strategy` 选择 provider 拉取封面，支持 fallback
 
-### 3) 工厂与运行器
+### 3) 运行器
 
-- `WorkflowFactory`
-  - 根据 `WorkflowContext` 动态拼装 pipeline
-  - 控制 block 连接顺序与条件连接
-- `WorkflowRunner`
-  - 对外执行入口
-  - 支持三种调用方式：
-    - `RunAsync(WorkflowContext context)`
-    - `RunAsync(Action<WorkflowContextBuilder> configure)`
-    - `RunAsync(WorkflowRequest request)`（仅传路径与配置）
+- `WorkflowRunner` - 对外执行入口
+  - `RunAsync`：单文件处理，返回 `WorkflowResult`
+  - `RunBatchAsync`：批量处理，返回 `IReadOnlyList<WorkflowResult>`
+  - `RunStreamAsync`：流式处理，支持外部 Channel 输入
 
-## Dataflow 连接规则
+## 文件命名规则
 
-固定顺序：
+输出文件名与原始 NCM 文件名保持一致：
 
-1. `Start`
-2. `Decrypt`
+- 音频文件：`{原始文件名}.{mp3|flac}`
+- 歌词文件：`{原始文件名}.lrc`
+- 封面文件：`{原始文件名}.{jpg|png}`（根据封面格式自动确定）
 
-条件步骤：
-
-- `LyricsOptions.ShouldGet == true` 时接 `GetLyrics`
-- `CoverOptions.ShouldGet == true` 时接 `GetCover`
-- `LyricsOptions.Embed || CoverOptions.Embed` 时接 `Embed`
-- `LyricsOptions.SaveToFile || CoverOptions.SaveToFile` 时接 `SaveToFile`
-
-最后统一触发 `WorkflowStage.Finished`。
-
-## 执行配置（TPL Dataflow）
-
-`WorkflowExecutionOptions` 当前支持：
-
-- `MaxDegreeOfParallelism`
-- `EnsureOrdered`
-- `BoundedCapacity`
-- `MaxMessagesPerTask`
-
-配置入口：
-
-- `WorkflowRequest.ExecutionOptions`
-- `WorkflowContextBuilder.UseExecutionOptions(...)`
-- `WorkflowContextBuilder.ConfigureExecution(...)`
-
-说明：
-
-- 单条 workflow 内部是按链路顺序执行的
-- 多文件并行建议并发调用 `runner.RunAsync(...)`（每文件一条 workflow）
-
-## 配置模型说明
+## 配置模型
 
 ### LyricsOptions
 
-- `Embed` / `SaveToFile` / `SavePath`
-- `Strategy`（歌词来源策略）
-- `ExportFormat` / `ExportMode` / `LineBreak`
-- `IncludeKinds`（翻译、罗马音等轨道）
-- `MaxTimeDeltaMs`（多轨 merge 时间容差）
+```csharp
+public record LyricsOptions
+{
+    public bool Embed { get; init; }           // 嵌入到音频文件
+    public bool SaveToFile { get; init; }      // 保存为独立文件
+    public LyricsSourceStrategy Strategy { get; init; }  // 来源策略
+    
+    // 导出配置
+    public ExportFormat ExportFormat { get; init; }      // LRC / JSON
+    public ExportMode ExportMode { get; init; }          // Interleaved / Separate
+    public string LineBreak { get; init; }               // 换行符
+    public ImmutableHashSet<LyricTrackKind> IncludeKinds { get; init; }  // 包含的轨道
+}
+```
 
 ### CoverOptions
 
-- `Embed` / `SaveToFile` / `SavePath`
-- `Strategy`
-  - `NetWork`
-  - `InFile`
-  - `NetWorkFirst`
-  - `InFileFirst`
+```csharp
+public record CoverOptions
+{
+    public bool Embed { get; init; }           // 嵌入到音频文件
+    public bool SaveToFile { get; init; }      // 保存为独立文件
+    public CoverSourceStrategy Strategy { get; init; }   // 来源策略
+}
+```
+
+### BatchOptions
+
+```csharp
+public record BatchOptions
+{
+    public int MaxDegreeOfParallelism { get; init; }  // 最大并行度
+    public int BoundedCapacity { get; init; }         // 队列容量（背压）
+}
+```
 
 ## 进度回调
 
 通过 `IProgress<WorkflowProgress>` 接收阶段进度：
 
-- `Started`
-- `Decrypted`
-- `GotLyrics`
-- `GotCover`
-- `EmbeddedInfo`
-- `SavedToFile`
-- `Finished`
+- `Started` → `Decrypted` → `GotLyrics` → `GotCover` → `EmbeddedInfo` → `SavedToFile` → `Finished`
 
 ## 使用方式
 
-### 1) 仅传路径和配置（推荐）
+### 1) 单文件处理
 
 ```csharp
-await runner.RunAsync(new WorkflowRequest
+var runner = serviceProvider.GetRequiredService<WorkflowRunner>();
+
+var result = await runner.RunAsync(new WorkflowRequest
 {
     SourceFilePath = @"D:\music\song.ncm",
     OutputDirectory = @"D:\music\out",
-    OutputFileName = "song",
-    LyricsOptions = new LyricsOptions
-    {
-        Embed = true,
-        SaveToFile = true,
-        SavePath = @"D:\music\out\song.lrc"
-    },
-    CoverOptions = new CoverOptions
-    {
-        Embed = true,
-        SaveToFile = true,
-        SavePath = @"D:\music\out\song.jpg",
-        Strategy = CoverSourceStrategy.NetWorkFirst
-    },
-    ExecutionOptions = new WorkflowExecutionOptions
-    {
-        MaxDegreeOfParallelism = 1,
-        EnsureOrdered = true
-    },
+    LyricsOptions = new LyricsOptions { Embed = true, SaveToFile = true },
+    CoverOptions = new CoverOptions { Embed = true, SaveToFile = true },
     Progress = new Progress<WorkflowProgress>(p =>
-        Console.WriteLine($"{p.Stage} | step={p.StepElapsed} | total={p.TotalElapsed}"))
+        Console.WriteLine($"{p.Stage} | {p.TotalElapsed.TotalMilliseconds:F0}ms"))
 });
+
+if (result.IsSuccess)
+{
+    Console.WriteLine($"输出: {result.OutputFilePath}");
+    Console.WriteLine($"歌词: {result.LyricsFilePath}");
+    Console.WriteLine($"封面: {result.CoverFilePath}");
+}
+else
+{
+    Console.WriteLine($"失败: {result.Error!.Message}");
+}
 ```
 
-### 2) Fluent Builder 入口
+### 2) 批量处理
 
 ```csharp
-await runner.RunAsync(builder => builder
-    .FromNcmFile(ncmFile)
-    .ToOutput(@"D:\music\out", "song")
-    .ConfigureLyrics(o => o with { Embed = true, SaveToFile = true, SavePath = @"D:\music\out\song.lrc" })
-    .ConfigureCover(o => o with { Embed = true, SaveToFile = true, SavePath = @"D:\music\out\song.jpg" })
-    .ConfigureExecution(o => o with { MaxDegreeOfParallelism = 1 }));
+var files = Directory.GetFiles(@"D:\music", "*.ncm");
+
+var requests = files.Select(f => new WorkflowRequest
+{
+    SourceFilePath = f,
+    OutputDirectory = @"D:\music\out",
+    LyricsOptions = new LyricsOptions { Embed = true },
+    CoverOptions = new CoverOptions { Embed = true }
+});
+
+var results = await runner.RunBatchAsync(requests, new BatchOptions
+{
+    MaxDegreeOfParallelism = 8,
+    BoundedCapacity = 50
+});
+
+var successes = results.Where(r => r.IsSuccess);
+var failures = results.Where(r => !r.IsSuccess);
+
+Console.WriteLine($"成功: {successes.Count()}, 失败: {failures.Count()}");
+
+foreach (var f in failures)
+{
+    Console.WriteLine($"  {Path.GetFileName(f.SourceFilePath)}: {f.Error!.Message}");
+}
 ```
 
-### 3) 直接传上下文
+### 3) 流式处理
+
+适用于文件监视器、消息队列等持续数据源：
 
 ```csharp
-var context = WorkflowFactory.CreateBuilder()
-    .FromNcmFile(ncmFile)
-    .ToOutput(@"D:\music\out\song.flac")
-    .Build();
+var channel = Channel.CreateBounded<WorkflowRequest>(100);
 
-await runner.RunAsync(context);
+// 生产者（如文件监视器）
+var watcher = new FileSystemWatcher(@"D:\incoming", "*.ncm");
+watcher.Created += async (s, e) =>
+{
+    await channel.Writer.WriteAsync(new WorkflowRequest
+    {
+        SourceFilePath = e.FullPath,
+        OutputDirectory = @"D:\music\out"
+    });
+};
+watcher.EnableRaisingEvents = true;
+
+// 消费者（后台持续处理）
+_ = runner.RunStreamAsync(channel.Reader, maxDegreeOfParallelism: 4);
+```
+
+### 4) 根据结果重命名文件
+
+```csharp
+var result = await runner.RunAsync(request);
+
+if (result.IsSuccess)
+{
+    // 重命名音频文件
+    var newName = $"[{result.OutputFilePath}]";
+    File.Move(result.OutputFilePath, Path.Combine(Path.GetDirectoryName(result.OutputFilePath)!, newName));
+    
+    // 或移动到其他目录
+    File.Move(result.OutputFilePath, @"D:\organized\music\song.mp3");
+}
 ```
 
 ## DI 注册
@@ -194,16 +205,6 @@ services.AddWorkflow();
 
 `AddWorkflow()` 会注册：
 
-- 所有 workflow blocks
-- `WorkflowFactory`
 - `WorkflowRunner`
+- `GetLyricsBlock`、`GetCoverBlock`
 - 封面与歌词 provider（含 HttpClient）
-
-## 扩展建议
-
-后续可扩展方向：
-
-- 在 `WorkflowFactory` 中引入可配置 block 插拔机制
-- 为批量任务增加上层队列与并发限制器
-- 为 `WorkflowRequest` 增加统一输出模板（歌词/封面默认命名规则）
-- 为 `WorkflowProgress` 增加文件级别 trace id 与错误事件

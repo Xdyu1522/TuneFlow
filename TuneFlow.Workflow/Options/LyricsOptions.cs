@@ -4,8 +4,12 @@ using TuneFlow.Lyrics.Models;
 
 namespace TuneFlow.Workflow.Options;
 
-public record LyricsOptions: ResourceBaseOptions
+public record LyricsOptions
 {
+    public bool Embed { get; init; }
+    public bool SaveToFile { get; init; }
+    public bool ShouldGet => Embed || SaveToFile;
+
     public ExportFormat ExportFormat { get; init; } = ExportFormat.Lrc;
     public ExportMode ExportMode { get; init; } = ExportMode.Interleaved;
     public int MaxTimeDeltaMs { get; init; } = 10;

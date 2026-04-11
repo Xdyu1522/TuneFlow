@@ -14,7 +14,7 @@ public static class CoverDownloader
         {
             throw;
         }
-        catch (Exception e)
+        catch (Exception)
         {
             return null;
         }
