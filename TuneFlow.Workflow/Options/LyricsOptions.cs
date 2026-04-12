@@ -14,6 +14,10 @@ public record LyricsOptions
     public ExportMode ExportMode { get; init; } = ExportMode.Interleaved;
     public int MaxTimeDeltaMs { get; init; } = 10;
     public string LineBreak { get; init; } = "\r\n";
-    public ImmutableHashSet<LyricTrackKind> IncludeKinds { get; init; } = ImmutableHashSet.Create(LyricTrackKind.Translation);
+    public string? SavePath { get; init; }
+
+    public ImmutableHashSet<LyricTrackKind> IncludeKinds { get; init; } =
+        ImmutableHashSet.Create(LyricTrackKind.Translation);
+
     public LyricsSourceStrategy Strategy { get; init; } = LyricsSourceStrategy.NetWork;
 }

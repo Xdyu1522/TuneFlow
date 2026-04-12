@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Help": {
+      "commandName": "Project",
+      "commandLineArgs": "--help"
+    },
+    "InfoTest": {
+      "commandName": "Project",
+      "commandLineArgs": "info \"E:\\CloudMusic\\VipSongsDownload\\ヨルシカ - 又三郎.ncm\""
+    },
+    "WatchTest": {
+      "commandName": "Project",
+      "commandLineArgs": "watch \"E:\\CloudMusic\" -s \"D:\\ncm\\tess\""
+    }
+  }
+}

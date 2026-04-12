@@ -127,18 +127,27 @@ public class WorkflowRunner(GetLyricsBlock getLyricsBlock, GetCoverBlock getCove
         };
 
         var outputPath = Path.Combine(request.OutputDirectory, baseFileName + extension);
-        var lyricsPath = request.LyricsOptions.SaveToFile
-            ? Path.Combine(request.OutputDirectory, baseFileName + ".lrc")
-            : null;
-        var coverExtension = ncmFile.CoverData?.Format switch
+        string? lyricsPath = null, coverPath = null;
+        if (request.LyricsOptions.SaveToFile)
+            lyricsPath = request.LyricsOptions.SavePath ?? Path.Combine(request.OutputDirectory, baseFileName + ".lrc");
+
+        if (request.CoverOptions.SaveToFile)
         {
-            CoverFormat.Jpeg => ".jpg",
-            CoverFormat.Png => ".png",
-            _ => ".jpg"
-        };
-        var coverPath = request.CoverOptions.SaveToFile
-            ? Path.Combine(request.OutputDirectory, baseFileName + coverExtension)
-            : null;
+            if (request.CoverOptions.SavePath is not null)
+            {
+                coverPath = request.CoverOptions.SavePath;
+            }
+            else
+            {
+                var coverExtension = ncmFile.CoverData?.Format switch
+                {
+                    CoverFormat.Jpeg => ".jpg",
+                    CoverFormat.Png => ".png",
+                    _ => ".jpg"
+                };
+                coverPath = Path.Combine(request.OutputDirectory, baseFileName + coverExtension);
+            }
+        }
 
         return new WorkflowContext
         {

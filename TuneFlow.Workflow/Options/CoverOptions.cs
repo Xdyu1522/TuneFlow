@@ -6,5 +6,7 @@ public record CoverOptions
     public bool SaveToFile { get; init; }
     public bool ShouldGet => Embed || SaveToFile;
 
+    public string? SavePath { get; init; }
+
     public CoverSourceStrategy Strategy { get; init; } = CoverSourceStrategy.NetWorkFirst;
 }
