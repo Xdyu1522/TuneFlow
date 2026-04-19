@@ -78,6 +78,7 @@ public class WorkflowRunner(GetLyricsBlock getLyricsBlock, GetCoverBlock getCove
 
     public async Task RunStreamAsync(
         ChannelReader<WorkflowRequest> reader,
+        Action<WorkflowResult>? onResult = null,
         int maxDegreeOfParallelism = 4,
         CancellationToken ct = default)
     {
@@ -88,7 +89,11 @@ public class WorkflowRunner(GetLyricsBlock getLyricsBlock, GetCoverBlock getCove
                 MaxDegreeOfParallelism = maxDegreeOfParallelism,
                 CancellationToken = ct
             },
-            async (request, token) => { await RunAsync(request, token); });
+            async (request, token) =>
+            {
+                var result = await RunAsync(request, token);
+                onResult?.Invoke(result);
+            });
     }
 
     private static async Task ProduceAsync(

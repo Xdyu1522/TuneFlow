@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Threading.Channels;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Spectre.Console.Rendering;
 using TuneFlow.Workflow;
 using TuneFlow.Workflow.Options;
 
@@ -9,7 +11,9 @@ namespace TuneFlow.Cli;
 
 public class WatchCommand(WorkflowRunner runner) : Command<WatchCommand.Settings>
 {
+    private readonly ConcurrentQueue<CompletedFile> _completedFiles = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _ctsMap = new();
+    private readonly ConcurrentDictionary<string, FileProgress> _progressMap = new();
     private Settings? _settings;
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -23,6 +27,51 @@ public class WatchCommand(WorkflowRunner runner) : Command<WatchCommand.Settings
         _settings = settings;
         if (!Path.Exists(settings.SavePath)) Directory.CreateDirectory(settings.SavePath);
 
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+
+        var token = cts.Token;
+
+        var channel = Channel.CreateBounded<WorkflowRequest>(new BoundedChannelOptions(100)
+        {
+            SingleReader = false,
+            SingleWriter = true
+        });
+
+        var progressReporter = new Progress<WorkflowProgress>(p =>
+        {
+            _progressMap.AddOrUpdate(
+                p.File.FullName,
+                _ => new FileProgress(p),
+                (_, existing) =>
+                {
+                    existing.Update(p);
+                    return existing;
+                });
+        });
+
+        var streamTask = runner.RunStreamAsync(
+            channel.Reader,
+            result =>
+            {
+                _progressMap.TryRemove(result.SourceFilePath, out _);
+
+                if (result.IsSuccess)
+                    _completedFiles.Enqueue(new CompletedFile(
+                        Path.GetFileName(result.SourceFilePath),
+                        result.OutputFilePath ?? ""));
+                else
+                    _completedFiles.Enqueue(new CompletedFile(
+                        Path.GetFileName(result.SourceFilePath),
+                        ErrorMessage: result.Error?.Message ?? "未知错误"));
+            },
+            4,
+            token);
+
         using var watcher = new FileSystemWatcher();
         watcher.Path = settings.Path;
         watcher.IncludeSubdirectories = true;
@@ -31,105 +80,260 @@ public class WatchCommand(WorkflowRunner runner) : Command<WatchCommand.Settings
         watcher.Filters.Add("*.ncm");
         watcher.EnableRaisingEvents = true;
 
-
         watcher.Changed += (s, e) =>
         {
             var path = e.FullPath;
 
-            // 1. 取消旧任务
             if (_ctsMap.TryRemove(path, out var oldCts))
             {
                 oldCts.Cancel();
                 oldCts.Dispose();
             }
 
-            // 2. 创建新的 CTS（使用原子更新更安全）
-            var cts = new CancellationTokenSource();
-            _ctsMap.AddOrUpdate(path, cts, (_, __) => cts);
+            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            _ctsMap.AddOrUpdate(path, linkedCts, (_, __) => linkedCts);
 
-            // 3. 启动防抖任务（无需 Task.Run）
-            _ = DebounceAsync(path, cts);
+            _ = DebounceAndEnqueueAsync(path, channel.Writer, progressReporter, linkedCts.Token);
         };
 
-        AnsiConsole.Status()
-            .Spinner(Spinner.Known.Dots)
-            .Start("正在监视文件更改... 按 [bold]Ctrl+C[/] 停止", ctx =>
-            {
-                // 卡住线程，直到用户取消任务
-                cancellationToken.WaitHandle.WaitOne();
-            });
+        AnsiConsole.MarkupLine("[bold blue]TuneFlow Watch[/] - 监视文件更改中...\n");
+
+        try
+        {
+            AnsiConsole.Live(new Markup(""))
+                .AutoClear(false)
+                .Overflow(VerticalOverflow.Ellipsis)
+                .Start(ctx =>
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        Thread.Sleep(200);
+                        ctx.UpdateTarget(RenderDisplay());
+                    }
+                });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        channel.Writer.TryComplete();
+
+        try
+        {
+            streamTask.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+        }
+
+        Console.Clear();
+        RenderFinalSummary();
 
         return 0;
     }
 
-    private async Task OnDownloadCompletedAsync(object? state)
+    private void RenderFinalSummary()
     {
-        ArgumentNullException.ThrowIfNull(_settings);
-        var filePath = (string)state!;
+        var files = _completedFiles.ToArray();
+        var successCount = files.Count(f => f.IsSuccess);
+        var failCount = files.Length - successCount;
 
-        // 此时文件大概率已经下载完毕且解开了锁定
-        AnsiConsole.MarkupLine($"[bold green]下载完成:[/] {Path.GetFileName(filePath)}，准备开始解密...");
-        var result = await runner.RunAsync(new WorkflowRequest
+        AnsiConsole.MarkupLine("[bold blue]TuneFlow Watch[/] - 处理完成\n");
+
+        var summary = new Panel(
+                new Markup($"[green]成功: {successCount}[/]  [red]失败: {failCount}[/]  [dim]总计: {files.Length}[/]"))
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Blue);
+
+        AnsiConsole.Write(summary);
+        AnsiConsole.WriteLine();
+
+        if (files.Length == 0)
         {
-            SourceFilePath = filePath,
-            OutputDirectory = _settings.SavePath,
-            LyricsOptions = new LyricsOptions
-            {
-                Embed = _settings.EmbedLyrics,
-                SaveToFile = _settings.SaveLyrics,
-                SavePath = _settings.LyricsPath
-            },
-            CoverOptions = new CoverOptions
-            {
-                Embed = _settings.EmbedCover,
-                SaveToFile = _settings.SaveCover,
-                SavePath = _settings.CoverPath
-            }
-        });
-        if (result.IsSuccess) AnsiConsole.MarkupLine("[bold green]解密完成[/]");
-        else
-            AnsiConsole.MarkupLine($"[bold red]{result.Error}[/]");
+            AnsiConsole.MarkupLine("[dim]未处理任何文件[/]");
+            return;
+        }
+
+        var table = new Table()
+            .Border(TableBorder.Rounded)
+            .BorderColor(Color.Grey)
+            .AddColumn("状态")
+            .AddColumn("源文件")
+            .AddColumn("结果");
+
+        foreach (var file in files)
+            if (file.IsSuccess)
+                table.AddRow(
+                    "[green]√[/]",
+                    $"[white]{file.SourceFile.EscapeMarkup()}[/]",
+                    $"[green]{file.OutputFile.EscapeMarkup()}[/]");
+            else
+                table.AddRow(
+                    "[red]×[/]",
+                    $"[white]{file.SourceFile.EscapeMarkup()}[/]",
+                    $"[red]{file.ErrorMessage.EscapeMarkup()}[/]");
+
+        AnsiConsole.Write(table);
     }
 
-    private async Task DebounceAsync(string path, CancellationTokenSource cts)
+    private Rows RenderDisplay()
+    {
+        var rows = new List<IRenderable>();
+
+        var progressPanel = RenderProgressPanel();
+        rows.Add(progressPanel);
+
+        var completedPanel = RenderCompletedPanel();
+        rows.Add(completedPanel);
+
+        return new Rows(rows);
+    }
+
+    private Panel RenderProgressPanel()
+    {
+        if (_progressMap.IsEmpty)
+            return new Panel(new Markup("[dim]等待新文件...[/]"))
+                .Header("[bold cyan]处理中[/]")
+                .Border(BoxBorder.Rounded)
+                .BorderColor(Color.Grey);
+
+        var table = new Table()
+            .Border(TableBorder.None)
+            .AddColumn("文件")
+            .AddColumn("阶段")
+            .AddColumn("耗时");
+
+        foreach (var kvp in _progressMap.OrderBy(x => x.Value.StartTime))
+        {
+            var progress = kvp.Value;
+            var fileName = Path.GetFileName(progress.FilePath);
+            var stage = GetStageDisplay(progress.Stage);
+            var elapsed = progress.TotalElapsed.ToString(@"mm\:ss\.ff");
+
+            table.AddRow(
+                $"[white]{fileName.EscapeMarkup()}[/]",
+                stage,
+                $"[dim]{elapsed}[/]");
+        }
+
+        return new Panel(table)
+            .Header("[bold cyan]处理中[/]")
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Cyan);
+    }
+
+    private Panel RenderCompletedPanel()
+    {
+        var files = _completedFiles.ToArray();
+        if (files.Length == 0)
+            return new Panel(new Markup("[dim]暂无已完成文件[/]"))
+                .Header("[bold green]已完成[/]")
+                .Border(BoxBorder.Rounded)
+                .BorderColor(Color.Grey);
+
+        var table = new Table()
+            .Border(TableBorder.None)
+            .AddColumn("状态")
+            .AddColumn("源文件")
+            .AddColumn("结果");
+
+        var displayFiles = files.TakeLast(10).ToArray();
+        foreach (var file in displayFiles)
+            if (file.IsSuccess)
+                table.AddRow(
+                    "[green]√[/]",
+                    $"[white]{file.SourceFile.EscapeMarkup()}[/]",
+                    $"[green]{file.OutputFile.EscapeMarkup()}[/]");
+            else
+                table.AddRow(
+                    "[red]×[/]",
+                    $"[white]{file.SourceFile.EscapeMarkup()}[/]",
+                    $"[red]{file.ErrorMessage.EscapeMarkup()}[/]");
+
+        var header = files.Length > 10
+            ? $"[bold green]已完成[/] [dim]({files.Length})[/]"
+            : "[bold green]已完成[/]";
+
+        return new Panel(table)
+            .Header(header)
+            .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Green);
+    }
+
+    private static string GetStageDisplay(WorkflowStage stage)
+    {
+        return stage switch
+        {
+            WorkflowStage.Started => "[yellow]开始处理[/]",
+            WorkflowStage.Decrypted => "[blue]解密中[/]",
+            WorkflowStage.GotLyrics => "[magenta]获取歌词[/]",
+            WorkflowStage.GotCover => "[cyan]获取封面[/]",
+            WorkflowStage.EmbeddedInfo => "[green]嵌入信息[/]",
+            WorkflowStage.SavedToFile => "[blue]保存文件[/]",
+            WorkflowStage.Finished => "[green]完成[/]",
+            _ => $"[dim]{stage}[/]"
+        };
+    }
+
+    private async Task DebounceAndEnqueueAsync(
+        string path,
+        ChannelWriter<WorkflowRequest> writer,
+        IProgress<WorkflowProgress> progress,
+        CancellationToken ct)
     {
         try
         {
-            // 防抖等待
-            await Task.Delay(500, cts.Token);
+            await Task.Delay(500, ct);
 
-            // 再次确认是最后一个任务
             if (!_ctsMap.TryRemove(path, out _))
                 return;
 
-            // ⚠️ 文件可能还没写完，做“就绪检测”
-            if (!await WaitForFileReadyAsync(path, cts.Token))
+            var ext = Path.GetExtension(path).ToLowerInvariant();
+            if (ext is not ".ncm")
+            {
+                AnsiConsole.MarkupLine($"[yellow]暂不支持处理:[/] {Path.GetFileName(path)} [dim]({ext})[/]");
+                return;
+            }
+
+            if (!await WaitForFileReadyAsync(path, ct))
             {
                 AnsiConsole.MarkupLine($"[yellow]文件仍被占用，跳过:[/] {Path.GetFileName(path)}");
                 return;
             }
 
-            // 真正执行
-            await OnDownloadCompletedAsync(path);
+            ArgumentNullException.ThrowIfNull(_settings);
+
+            var request = new WorkflowRequest
+            {
+                SourceFilePath = path,
+                OutputDirectory = _settings.SavePath,
+                LyricsOptions = new LyricsOptions
+                {
+                    Embed = _settings.EmbedLyrics,
+                    SaveToFile = _settings.SaveLyrics,
+                    SavePath = _settings.LyricsPath
+                },
+                CoverOptions = new CoverOptions
+                {
+                    Embed = _settings.EmbedCover,
+                    SaveToFile = _settings.SaveCover,
+                    SavePath = _settings.CoverPath
+                },
+                Progress = progress
+            };
+
+            await writer.WriteAsync(request, ct);
         }
         catch (OperationCanceledException)
         {
-            // 正常取消，无需处理
         }
         catch (Exception ex)
         {
             AnsiConsole.WriteException(ex);
         }
-        finally
-        {
-            cts.Dispose(); // 防止泄漏
-        }
     }
 
-    private async Task<bool> WaitForFileReadyAsync(
-        string path,
-        CancellationToken token,
-        int maxRetry = 10,
+    private async Task<bool> WaitForFileReadyAsync(string path, CancellationToken token, int maxRetry = 10,
         int delayMs = 200)
     {
         for (var i = 0; i < maxRetry; i++)
@@ -145,22 +349,36 @@ public class WatchCommand(WorkflowRunner runner) : Command<WatchCommand.Settings
         return false;
     }
 
-    private bool IsFileReady(string path)
+    private static bool IsFileReady(string path)
     {
         try
         {
-            using var stream = File.Open(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.None); // 独占访问
-
+            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
             return true;
         }
         catch
         {
             return false;
         }
+    }
+
+    private class FileProgress(WorkflowProgress progress)
+    {
+        public string FilePath { get; } = progress.File.FullName;
+        public WorkflowStage Stage { get; private set; } = progress.Stage;
+        public TimeSpan TotalElapsed { get; private set; } = progress.TotalElapsed;
+        public DateTime StartTime { get; } = DateTime.Now;
+
+        public void Update(WorkflowProgress progress)
+        {
+            Stage = progress.Stage;
+            TotalElapsed = progress.TotalElapsed;
+        }
+    }
+
+    private record CompletedFile(string SourceFile, string? OutputFile = null, string? ErrorMessage = null)
+    {
+        public bool IsSuccess => ErrorMessage is null;
     }
 
     public class Settings : CommandSettings

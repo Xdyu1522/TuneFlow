@@ -9,6 +9,10 @@
       "commandName": "Project",
       "commandLineArgs": "info \"E:\\CloudMusic\\VipSongsDownload\\ヨルシカ - 又三郎.ncm\""
     },
+    "InfoJsonTest": {
+      "commandName": "Project",
+      "commandLineArgs": "info \"E:\\CloudMusic\\深\\周深 - 化身孤岛的鲸.ncm\" --json"
+    },
     "WatchTest": {
       "commandName": "Project",
       "commandLineArgs": "watch \"E:\\CloudMusic\" -s \"D:\\ncm\\tess\""

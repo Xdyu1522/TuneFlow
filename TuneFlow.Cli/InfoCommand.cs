@@ -1,8 +1,11 @@
 using System.ComponentModel;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using NcmFox;
 using NcmFox.Models;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Spectre.Console.Json;
 using Spectre.Console.Rendering;
 
 namespace TuneFlow.Cli;
@@ -31,6 +34,19 @@ public class InfoCommand : Command<InfoCommandSettings>
         {
             AnsiConsole.MarkupLine(
                 $"[white]{meta.SongName}[/] [dim]-[/] [cyan]{string.Join(", ", meta.Artists.Select(a => a.Name))}[/]");
+            return 0;
+        }
+
+        if (settings.Json)
+        {
+            var json = JsonSerializer.Serialize(meta, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            var jsonText = new JsonText(json);
+            AnsiConsole.Write(jsonText);
             return 0;
         }
 
@@ -150,6 +166,10 @@ public class InfoCommandSettings : CommandSettings
     [CommandOption("--short")]
     [Description("简短展示信息")]
     public bool Short { get; set; }
+
+    [CommandOption("--json")]
+    [Description("以Json形式展示MetadData")]
+    public bool Json { get; set; }
 
     [CommandOption("--extract-cover")]
     [Description("提取封面")]

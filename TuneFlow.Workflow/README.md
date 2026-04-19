@@ -42,7 +42,7 @@
 - `WorkflowRunner` - 对外执行入口
   - `RunAsync`：单文件处理，返回 `WorkflowResult`
   - `RunBatchAsync`：批量处理，返回 `IReadOnlyList<WorkflowResult>`
-  - `RunStreamAsync`：流式处理，支持外部 Channel 输入
+  - `RunStreamAsync`：流式处理，支持外部 Channel 输入，通过回调返回结果
 
 ## 文件命名规则
 
@@ -164,6 +164,19 @@ foreach (var f in failures)
 ```csharp
 var channel = Channel.CreateBounded<WorkflowRequest>(100);
 
+// 消费者（后台持续处理，通过回调获取结果）
+_ = runner.RunStreamAsync(
+    channel.Reader,
+    result =>
+    {
+        var fileName = Path.GetFileName(result.SourceFilePath);
+        if (result.IsSuccess)
+            Console.WriteLine($"✓ {fileName}");
+        else
+            Console.WriteLine($"✗ {fileName}: {result.Error?.Message}");
+    },
+    maxDegreeOfParallelism: 4);
+
 // 生产者（如文件监视器）
 var watcher = new FileSystemWatcher(@"D:\incoming", "*.ncm");
 watcher.Created += async (s, e) =>
@@ -175,9 +188,6 @@ watcher.Created += async (s, e) =>
     });
 };
 watcher.EnableRaisingEvents = true;
-
-// 消费者（后台持续处理）
-_ = runner.RunStreamAsync(channel.Reader, maxDegreeOfParallelism: 4);
 ```
 
 ### 4) 根据结果重命名文件
